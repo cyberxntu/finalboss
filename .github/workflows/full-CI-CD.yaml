@@ -26,9 +26,11 @@ jobs:
         run: |
           pip install requests bandit detect-secrets jq flake8 black semgrep
           # Install gitleaks
-          curl -sSL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks-linux-amd64 -o gitleaks
-          chmod +x gitleaks
-          sudo mv gitleaks /usr/local/bin/gitleaks
+          wget https://github.com/gitleaks/gitleaks/releases/download/v8.18.1/gitleaks_8.18.1_linux_x64.tar.gz
+          tar -xzf gitleaks_8.18.1_linux_x64.tar.gz
+          cd gitleaks_8.18.1_linux_x64   # تدخل مجلد التفكيك
+          sudo mv gitleaks /usr/local/bin/
+
 
       - name: Run Bandit (SAST) with filtering low and B104
         run: |
