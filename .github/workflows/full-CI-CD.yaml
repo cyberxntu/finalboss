@@ -25,10 +25,16 @@ jobs:
       - name: Install Python dependencies and tools
         run: |
           pip install requests bandit detect-secrets jq flake8 black semgrep
-          # Install gitleaks binary
-          curl -sSL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks-linux-amd64 -o gitleaks
+
+          # Install gitleaks binary (with -L to follow redirects)
+          curl -sSL -L -o gitleaks https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks-linux-amd64
           chmod +x gitleaks
           sudo mv gitleaks /usr/local/bin/gitleaks
+
+          # Install segrep binary (semgrep CLI)
+          curl -sSL -L -o semgrep https://github.com/returntocorp/semgrep/releases/latest/download/semgrep-linux-amd64
+          chmod +x semgrep
+          sudo mv semgrep /usr/local/bin/semgrep
 
       - name: Run Bandit (SAST) with B104 exclusion
         run: |
@@ -41,7 +47,7 @@ jobs:
 
       - name: Run semgrep (SAST)
         run: |
-          semgrep scan -p python --json > semgrep_output.json || echo '{"results":[]}' > semgrep_output.json
+          semgrep --json > semgrep_output.json || echo '{"results":[]}' > semgrep_output.json
 
       - name: Run flake8 (Code Style)
         run: |
@@ -93,7 +99,7 @@ jobs:
                 count=$(jq 'if type=="array" then length elif type=="object" and has("results") then .results | length elif type=="object" then length else 0 end' "$file")
                 if [ "$count" -gt 0 ]; then
                   echo "Issues detected in $file: $count"
-                  # لا نفشل البناء بسبب semgrep، فقط تحذير
+                  # semgrep لا يفشل البناء
                   if [ "$file" != "semgrep_output.json" ]; then
                     fail=1
                   else
