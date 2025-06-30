@@ -29,10 +29,6 @@ jobs:
           curl -sSL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks-linux-amd64 -o gitleaks
           chmod +x gitleaks
           sudo mv gitleaks /usr/local/bin/gitleaks
-          # Install segrep binary
-          curl -sSL https://github.com/segrep/segrep/releases/latest/download/segrep-linux-amd64 -o segrep
-          chmod +x segrep
-          sudo mv segrep /usr/local/bin/segrep
 
       - name: Run Bandit (SAST) with B104 exclusion
         run: |
@@ -43,9 +39,9 @@ jobs:
         run: |
           gitleaks detect --source . --report-format json --report-path gitleaks_report.json || true
 
-      - name: Run segrep (Semgrep SAST)
+      - name: Run semgrep (SAST)
         run: |
-          segrep scan -p python --json > semgrep_output.json || echo '{"results":[]}' > semgrep_output.json
+          semgrep scan -p python --json > semgrep_output.json || echo '{"results":[]}' > semgrep_output.json
 
       - name: Run flake8 (Code Style)
         run: |
@@ -97,7 +93,7 @@ jobs:
                 count=$(jq 'if type=="array" then length elif type=="object" and has("results") then .results | length elif type=="object" then length else 0 end' "$file")
                 if [ "$count" -gt 0 ]; then
                   echo "Issues detected in $file: $count"
-                  # semgrep لا يفشل البناء
+                  # لا نفشل البناء بسبب semgrep، فقط تحذير
                   if [ "$file" != "semgrep_output.json" ]; then
                     fail=1
                   else
