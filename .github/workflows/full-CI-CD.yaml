@@ -25,9 +25,9 @@ jobs:
       - name: Install Python dependencies
         run: pip install requests bandit detect-secrets jq
 
-      - name: Run SAST (Bandit with exclude B104)
+      - name: Run SAST (Bandit with B104 exclusion)
         run: |
-          bandit -r app.py --exclude B104 -f json -o bandit_output.json || true
+          bandit -r app.py -f json -o bandit_output.json --exclude B104 || true
           jq '.results | map(select(.issue_severity != "LOW"))' bandit_output.json > sast_results.json
 
       - name: Run SCA
