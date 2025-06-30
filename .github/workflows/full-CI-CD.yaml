@@ -129,7 +129,7 @@ jobs:
       - name: Run Nikto scan on staging
         run: |
           mkdir -p nikto_reports
-          nikto -h https://devops-staging.fly.dev -o nikto_reports/nikto_report.html -Format htm
+          nikto -h devops-staging.fly.dev -ssl -o nikto_reports/nikto_report.html -Format htm
 
       - name: Upload Nikto report
         uses: actions/upload-artifact@v4
