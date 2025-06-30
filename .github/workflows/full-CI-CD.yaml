@@ -22,23 +22,17 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install Python dependencies and tools
+      - name: Install Python dependencies and security tools
         run: |
           pip install requests bandit detect-secrets jq flake8 black semgrep
-
-          # Install gitleaks binary (with -L to follow redirects)
-          curl -sSL -L -o gitleaks https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks-linux-amd64
+          # Install gitleaks
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks-linux-amd64 -o gitleaks
           chmod +x gitleaks
           sudo mv gitleaks /usr/local/bin/gitleaks
 
-          # Install segrep binary (semgrep CLI)
-          curl -sSL -L -o semgrep https://github.com/returntocorp/semgrep/releases/latest/download/semgrep-linux-amd64
-          chmod +x semgrep
-          sudo mv semgrep /usr/local/bin/semgrep
-
-      - name: Run Bandit (SAST) with B104 exclusion
+      - name: Run Bandit (SAST) with filtering low and B104
         run: |
-          bandit -r app.py -f json -o bandit_output.json || true
+          bandit -r . -f json -o bandit_output.json || true
           jq '.results | map(select(.test_id != "B104" and .issue_severity != "LOW"))' bandit_output.json > sast_results.json
 
       - name: Run gitleaks (Secret Scan)
@@ -47,7 +41,7 @@ jobs:
 
       - name: Run semgrep (SAST)
         run: |
-          semgrep --json > semgrep_output.json || echo '{"results":[]}' > semgrep_output.json
+          semgrep --config=p/ci --json > semgrep_output.json || echo '{"results":[]}' > semgrep_output.json
 
       - name: Run flake8 (Code Style)
         run: |
@@ -61,59 +55,60 @@ jobs:
           sed -i '$ s/},/}/' black_output.json
           echo "]" >> black_output.json
 
-      - name: Merge all results
+      - name: Merge all scan results into one JSON
         run: |
           echo "{" > full_report.json
-          echo '"sast":' >> full_report.json && (cat sast_results.json || echo '[]') >> full_report.json
+          echo '"sast":' >> full_report.json && cat sast_results.json >> full_report.json
           echo ',' >> full_report.json
-          echo '"sca":' >> full_report.json && (cat sca_results.json || echo '[]') >> full_report.json
+          echo '"secrets":' >> full_report.json && cat gitleaks_report.json >> full_report.json
           echo ',' >> full_report.json
-          echo '"secrets":' >> full_report.json && (cat gitleaks_report.json || echo '[]') >> full_report.json
+          echo '"semgrep":' >> full_report.json && cat semgrep_output.json >> full_report.json
           echo ',' >> full_report.json
-          echo '"semgrep":' >> full_report.json && (cat semgrep_output.json || echo '{"results":[]}') >> full_report.json
-          echo ',' >> full_report.json
-          echo '"style": {"flake8":' >> full_report.json && (cat flake8_output.json || echo '{}') >> full_report.json
-          echo ',"black":' >> full_report.json && (cat black_output.json || echo '[]') >> full_report.json
+          echo '"style": {"flake8":' >> full_report.json && cat flake8_output.json >> full_report.json
+          echo ',"black":' >> full_report.json && cat black_output.json >> full_report.json
           echo '}' >> full_report.json
           echo "}" >> full_report.json
 
-      - name: Upload Results
+      - name: Upload scan results
         uses: actions/upload-artifact@v4
         with:
           name: scan-results
           path: |
             sast_results.json
-            sca_results.json
             gitleaks_report.json
             semgrep_output.json
             flake8_output.json
             black_output.json
             full_report.json
 
-      - name: Fail if real security issues found
+      - name: Fail build on high severity findings (except semgrep warnings)
         run: |
           fail=0
-          for file in sast_results.json sca_results.json gitleaks_report.json semgrep_output.json flake8_output.json black_output.json; do
-            if [ -s "$file" ]; then
-              if jq empty "$file" 2>/dev/null; then
-                count=$(jq 'if type=="array" then length elif type=="object" and has("results") then .results | length elif type=="object" then length else 0 end' "$file")
-                if [ "$count" -gt 0 ]; then
-                  echo "Issues detected in $file: $count"
-                  # semgrep لا يفشل البناء
-                  if [ "$file" != "semgrep_output.json" ]; then
-                    fail=1
-                  else
-                    echo "Warning only: semgrep issues found but not failing the build."
-                  fi
-                fi
-              else
-                echo "Warning: $file is not valid JSON, skipping fail check."
-              fi
-            else
-              echo "$file: 0 issues (empty file)"
-            fi
-          done
+          # Bandit errors
+          count_bandit=$(jq 'length' sast_results.json)
+          if [ "$count_bandit" -gt 0 ]; then
+            echo "Bandit issues found: $count_bandit"
+            fail=1
+          fi
+
+          # Gitleaks secrets (stop on any secret found)
+          count_gitleaks=$(jq '. | length' gitleaks_report.json)
+          if [ "$count_gitleaks" -gt 0 ]; then
+            echo "Secrets found by gitleaks: $count_gitleaks"
+            fail=1
+          fi
+
+          # Semgrep errors - only block if severity ERROR (skip warnings)
+          count_semgrep=$(jq '.results | map(select(.extra.severity == "ERROR")) | length' semgrep_output.json)
+          if [ "$count_semgrep" -gt 0 ]; then
+            echo "Semgrep critical errors found: $count_semgrep"
+            fail=1
+          else
+            echo "Semgrep issues found but no critical errors - build continues."
+          fi
+
           if [ "$fail" -eq 1 ]; then
+            echo "Failing build due to security issues."
             exit 1
           fi
 
@@ -122,7 +117,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Log in to DockerHub
         run: echo "${{ secrets.PASS_SECRET }}" | docker login -u "x7m7s7" --password-stdin
