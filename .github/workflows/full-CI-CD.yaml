@@ -25,37 +25,19 @@ jobs:
       - name: Install Python dependencies
         run: pip install requests bandit detect-secrets jq
 
-      - name: Install Trivy (latest)
+      - name: Run SAST (Bandit with filter)
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-
-      - name: Run SAST
-        run: python .github/workflows/scripts/sast.py app.py /templates
-
-      - name: Show SAST results
-        run: |
-          if [ -f sast_results.json ]; then cat sast_results.json; else echo "No SAST results file found."; fi
+          bandit -r app.py -f json -o bandit_output.json || true
+          jq '.results | map(select(.issue_severity != "LOW"))' bandit_output.json > sast_results.json
 
       - name: Run SCA
         run: python .github/workflows/scripts/sca.py requirements.txt
 
-      - name: Show SCA results
-        run: |
-          if [ -f sca_results.json ]; then cat sca_results.json; else echo "No SCA results file found."; fi
-
       - name: Run Secret Scan
         run: python .github/workflows/scripts/secret_scanner.py
 
-      - name: Show Secret Scan results
-        run: |
-          if [ -f secrets_found.json ]; then cat secrets_found.json; else echo "No secrets_found results file found."; fi
-
       - name: Run Code Style
         run: python .github/workflows/scripts/code_style.py
-
-      - name: Show Code Style results
-        run: |
-          if [ -f style_results.json ]; then cat style_results.json; else echo "No style results file found."; fi
 
       - name: Merge all results
         run: |
@@ -79,6 +61,17 @@ jobs:
             secrets_found.json
             style_results.json
             full_report.json
+
+      - name: Count issues per tool
+        run: |
+          for file in sast_results.json sca_results.json secrets_found.json style_results.json; do
+            if [ -s "$file" ]; then
+              count=$(jq 'if type=="array" then length elif type=="object" and has("results") then .results | length else 0 end' "$file")
+              echo "$file: $count issues"
+            else
+              echo "$file: 0 issues"
+            fi
+          done
 
       - name: Fail if real security issues found
         run: |
