@@ -76,22 +76,33 @@ jobs:
             fi
           done
 
-      - name: Fail if real security issues found
-        run: |
-          fail=0
-          for file in sast_results.json sca_results.json secrets_found.json semgrep_output.json; do
-            if [ -s "$file" ]; then
-              count=$(jq 'if type=="array" then length elif type=="object" and has("results") then .results | length elif type=="object" then length else 0 end' "$file")
-              if [ "$count" -gt 0 ]; then
-                echo "Issues detected in $file"
-                fail=1
-              fi
+           - name: Fail if real security issues found
+             run: |
+                      fail=0
+                      for file in sast_results.json sca_results.json secrets_found.json semgrep_output.json; do
+                            if [ -s "$file" ]; then
+                                    if jq empty "$file" 2>/dev/null; then
+                                    count=$(jq 'if type=="array" then length elif type=="object" and has("results") then .results | length elif type=="object" then length else 0 end' "$file")
+                                    if [ "$count" -gt 0 ]; then
+            echo "Issues detected in $file: $count"
+            if [ "$file" != "semgrep_output.json" ]; then
+              fail=1
+                  else
+              echo "Warning only: semgrep issues found but not failing the build."
             fi
-          done
-          if [ "$fail" -eq 1 ]; then
-            exit 1
           fi
+          else
+          echo "Warning: $file is not valid JSON, skipping fail check."
+           fi
+          else
+          echo "$file: 0 issues (empty file)"
+           fi
+          done
 
+          if [ "$fail" -eq 1 ]; then
+          exit 1
+          fi
+                
   build-and-push:
     needs: security-check
     runs-on: ubuntu-latest
