@@ -26,7 +26,9 @@ jobs:
 
       - name: Install Gitleaks & Semgrep
         run: |
-          curl -sSL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_$(uname -s)_$(uname -m).tar.gz | tar -xz -C /usr/local/bin gitleaks
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks-linux-amd64 -o gitleaks
+           chmod +x gitleaks
+           sudo mv gitleaks /usr/local/bin/gitleaks
           pip install semgrep
 
       - name: Run SAST (Bandit with B104 exclusion)
