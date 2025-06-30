@@ -8,6 +8,7 @@ env:
   IMAGE_TAG: x7m7s7/devops:latest
 
 jobs:
+
   security-check:
     runs-on: ubuntu-latest
     steps:
@@ -21,26 +22,42 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install Python dependencies
-        run: pip install requests bandit jq
-
-      - name: Install Gitleaks & Semgrep
+      - name: Install Python dependencies and tools
         run: |
+          pip install requests bandit detect-secrets jq flake8 black semgrep
+          # Install gitleaks binary
           curl -sSL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks-linux-amd64 -o gitleaks
-           chmod +x gitleaks
-           sudo mv gitleaks /usr/local/bin/gitleaks
-          pip install semgrep
+          chmod +x gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+          # Install segrep binary
+          curl -sSL https://github.com/segrep/segrep/releases/latest/download/segrep-linux-amd64 -o segrep
+          chmod +x segrep
+          sudo mv segrep /usr/local/bin/segrep
 
-      - name: Run SAST (Bandit with B104 exclusion)
+      - name: Run Bandit (SAST) with B104 exclusion
         run: |
           bandit -r app.py -f json -o bandit_output.json || true
           jq '.results | map(select(.test_id != "B104" and .issue_severity != "LOW"))' bandit_output.json > sast_results.json
 
-      - name: Run Gitleaks
-        run: gitleaks detect --source . --report-format json --report-path secrets_found.json || true
+      - name: Run gitleaks (Secret Scan)
+        run: |
+          gitleaks detect --source . --report-format json --report-path gitleaks_report.json || true
 
-      - name: Run Semgrep
-        run: semgrep --config auto . --json > semgrep_output.json || true
+      - name: Run segrep (Semgrep SAST)
+        run: |
+          segrep scan -p python --json > semgrep_output.json || echo '{"results":[]}' > semgrep_output.json
+
+      - name: Run flake8 (Code Style)
+        run: |
+          flake8 . --exit-zero --format=json > flake8_output.json
+
+      - name: Run black check (Code Style)
+        run: |
+          black . --check --diff > black_output.txt || true
+          echo "[" > black_output.json
+          awk '{print "{\"line\": \"" $0 "\"},"}' black_output.txt >> black_output.json
+          sed -i '$ s/},/}/' black_output.json
+          echo "]" >> black_output.json
 
       - name: Merge all results
         run: |
@@ -49,9 +66,13 @@ jobs:
           echo ',' >> full_report.json
           echo '"sca":' >> full_report.json && (cat sca_results.json || echo '[]') >> full_report.json
           echo ',' >> full_report.json
-          echo '"secrets":' >> full_report.json && (cat secrets_found.json || echo '[]') >> full_report.json
+          echo '"secrets":' >> full_report.json && (cat gitleaks_report.json || echo '[]') >> full_report.json
           echo ',' >> full_report.json
-          echo '"semgrep":' >> full_report.json && (cat semgrep_output.json || echo '[]') >> full_report.json
+          echo '"semgrep":' >> full_report.json && (cat semgrep_output.json || echo '{"results":[]}') >> full_report.json
+          echo ',' >> full_report.json
+          echo '"style": {"flake8":' >> full_report.json && (cat flake8_output.json || echo '{}') >> full_report.json
+          echo ',"black":' >> full_report.json && (cat black_output.json || echo '[]') >> full_report.json
+          echo '}' >> full_report.json
           echo "}" >> full_report.json
 
       - name: Upload Results
@@ -61,48 +82,39 @@ jobs:
           path: |
             sast_results.json
             sca_results.json
-            secrets_found.json
+            gitleaks_report.json
             semgrep_output.json
+            flake8_output.json
+            black_output.json
             full_report.json
 
-      - name: Count issues per tool
+      - name: Fail if real security issues found
         run: |
-          for file in sast_results.json sca_results.json secrets_found.json semgrep_output.json; do
+          fail=0
+          for file in sast_results.json sca_results.json gitleaks_report.json semgrep_output.json flake8_output.json black_output.json; do
             if [ -s "$file" ]; then
-              count=$(jq 'if type=="array" then length elif type=="object" and has("results") then .results | length elif type=="object" then length else 0 end' "$file")
-              echo "$file: $count issues"
-            else
-              echo "$file: 0 issues"
-            fi
-          done
-
-           - name: Fail if real security issues found
-             run: |
-                      fail=0
-                      for file in sast_results.json sca_results.json secrets_found.json semgrep_output.json; do
-                            if [ -s "$file" ]; then
-                                    if jq empty "$file" 2>/dev/null; then
-                                    count=$(jq 'if type=="array" then length elif type=="object" and has("results") then .results | length elif type=="object" then length else 0 end' "$file")
-                                    if [ "$count" -gt 0 ]; then
-            echo "Issues detected in $file: $count"
-            if [ "$file" != "semgrep_output.json" ]; then
-              fail=1
+              if jq empty "$file" 2>/dev/null; then
+                count=$(jq 'if type=="array" then length elif type=="object" and has("results") then .results | length elif type=="object" then length else 0 end' "$file")
+                if [ "$count" -gt 0 ]; then
+                  echo "Issues detected in $file: $count"
+                  # semgrep لا يفشل البناء
+                  if [ "$file" != "semgrep_output.json" ]; then
+                    fail=1
                   else
-              echo "Warning only: semgrep issues found but not failing the build."
+                    echo "Warning only: semgrep issues found but not failing the build."
+                  fi
+                fi
+              else
+                echo "Warning: $file is not valid JSON, skipping fail check."
+              fi
+            else
+              echo "$file: 0 issues (empty file)"
             fi
-          fi
-          else
-          echo "Warning: $file is not valid JSON, skipping fail check."
-           fi
-          else
-          echo "$file: 0 issues (empty file)"
-           fi
           done
-
           if [ "$fail" -eq 1 ]; then
-          exit 1
+            exit 1
           fi
-                
+
   build-and-push:
     needs: security-check
     runs-on: ubuntu-latest
