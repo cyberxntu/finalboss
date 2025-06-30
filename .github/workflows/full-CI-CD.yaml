@@ -23,7 +23,7 @@ jobs:
           python-version: "3.10"
 
       - name: Install Python dependencies
-        run: pip install requests bandit detect-secrets jq
+        run: pip install requests bandit detect-secrets jq flake8 black
 
       - name: Run SAST (Bandit with B104 exclusion)
         run: |
@@ -36,8 +36,20 @@ jobs:
       - name: Run Secret Scan
         run: python .github/workflows/scripts/secret_scanner.py
 
-      - name: Run Code Style
-        run: python .github/workflows/scripts/code_style.py
+      - name: Run flake8
+        run: |
+          flake8 . --exit-zero --format=json > flake8_output.json
+
+      - name: Run black check
+        run: |
+          black . --check --diff > black_output.txt || true
+
+      - name: Convert black output to json
+        run: |
+          echo "[" > black_output.json
+          awk '{print "{\"line\": \"" $0 "\"},"}' black_output.txt >> black_output.json
+          sed -i '$ s/},/}/' black_output.json
+          echo "]" >> black_output.json
 
       - name: Merge all results
         run: |
@@ -48,7 +60,9 @@ jobs:
           echo ',' >> full_report.json
           echo '"secrets":' >> full_report.json && (cat secrets_found.json || echo '[]') >> full_report.json
           echo ',' >> full_report.json
-          echo '"style":' >> full_report.json && (cat style_results.json || echo '[]') >> full_report.json
+          echo '"style": {"flake8":' >> full_report.json && (cat flake8_output.json || echo '{}') >> full_report.json
+          echo ',"black":' >> full_report.json && (cat black_output.json || echo '[]') >> full_report.json
+          echo '}' >> full_report.json
           echo "}" >> full_report.json
 
       - name: Upload Results
@@ -59,14 +73,15 @@ jobs:
             sast_results.json
             sca_results.json
             secrets_found.json
-            style_results.json
+            flake8_output.json
+            black_output.json
             full_report.json
 
       - name: Count issues per tool
         run: |
-          for file in sast_results.json sca_results.json secrets_found.json style_results.json; do
+          for file in sast_results.json sca_results.json secrets_found.json flake8_output.json black_output.json; do
             if [ -s "$file" ]; then
-              count=$(jq 'if type=="array" then length elif type=="object" and has("results") then .results | length else 0 end' "$file")
+              count=$(jq 'if type=="array" then length elif type=="object" and has("results") then .results | length elif type=="object" then length else 0 end' "$file")
               echo "$file: $count issues"
             else
               echo "$file: 0 issues"
@@ -76,11 +91,11 @@ jobs:
       - name: Fail if real security issues found
         run: |
           fail=0
-          for file in sast_results.json sca_results.json secrets_found.json style_results.json; do
+          for file in sast_results.json sca_results.json secrets_found.json flake8_output.json black_output.json; do
             if [ -s "$file" ]; then
-              count=$(jq 'if type=="array" then length elif type=="object" and has("results") then .results | length else 0 end' "$file")
+              count=$(jq 'if type=="array" then length elif type=="object" and has("results") then .results | length elif type=="object" then length else 0 end' "$file")
               if [ "$count" -gt 0 ]; then
-                echo "Security issues detected in $file"
+                echo "Issues detected in $file"
                 fail=1
               fi
             fi
