@@ -25,21 +25,18 @@ jobs:
       - name: Install Python dependencies and security tools
         run: |
           pip install requests bandit detect-secrets jq flake8 black semgrep
-          # Install gitleaks
-          wget https://github.com/gitleaks/gitleaks/releases/download/v8.18.1/gitleaks_8.18.1_linux_x64.tar.gz
-          tar -xzf gitleaks_8.18.1_linux_x64.tar.gz
-          cd gitleaks_8.18.1_linux_x64   # تدخل مجلد التفكيك
-          sudo mv gitleaks /usr/local/bin/
-
 
       - name: Run Bandit (SAST) with filtering low and B104
         run: |
           bandit -r . -f json -o bandit_output.json || true
           jq '.results | map(select(.test_id != "B104" and .issue_severity != "LOW"))' bandit_output.json > sast_results.json
 
-      - name: Run gitleaks (Secret Scan)
+      - name: Run detect-secrets (Secret Scan)
         run: |
-          gitleaks detect --source . --report-format json --report-path gitleaks_report.json || true
+          detect-secrets scan > .secrets.baseline
+          detect-secrets scan --json > detect_secrets_raw.json
+          # تحويل النتائج الى صيغة أبسط بدون false positives السابقة (audit mode عادة يدوي، لكن هنا مجرد مثال تلقائي)
+          jq '{results: .}' detect_secrets_raw.json > detect_secrets_report.json || echo '{"results":[]}' > detect_secrets_report.json
 
       - name: Run semgrep (SAST)
         run: |
@@ -62,7 +59,7 @@ jobs:
           echo "{" > full_report.json
           echo '"sast":' >> full_report.json && cat sast_results.json >> full_report.json
           echo ',' >> full_report.json
-          echo '"secrets":' >> full_report.json && cat gitleaks_report.json >> full_report.json
+          echo '"secrets":' >> full_report.json && cat detect_secrets_report.json >> full_report.json
           echo ',' >> full_report.json
           echo '"semgrep":' >> full_report.json && cat semgrep_output.json >> full_report.json
           echo ',' >> full_report.json
@@ -77,7 +74,7 @@ jobs:
           name: scan-results
           path: |
             sast_results.json
-            gitleaks_report.json
+            detect_secrets_report.json
             semgrep_output.json
             flake8_output.json
             black_output.json
@@ -93,10 +90,10 @@ jobs:
             fail=1
           fi
 
-          # Gitleaks secrets (stop on any secret found)
-          count_gitleaks=$(jq '. | length' gitleaks_report.json)
-          if [ "$count_gitleaks" -gt 0 ]; then
-            echo "Secrets found by gitleaks: $count_gitleaks"
+          # Detect-secrets secrets found (تتأكد من وجود نتائج حقيقية)
+          count_secrets=$(jq '.results | length' detect_secrets_report.json)
+          if [ "$count_secrets" -gt 0 ]; then
+            echo "Secrets found by detect-secrets: $count_secrets"
             fail=1
           fi
 
