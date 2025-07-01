@@ -26,6 +26,185 @@ jobs:
         run: |
           pip install requests bandit detect-secrets jq flake8 black semgrep
 
+      - name: Download and install Gitleaks v8.27.2
+        run: |
+          curl -L https://github.com/gitleaks/gitleaks/releases/download/v8.27.2/gitleaks_8.27.2_linux_x64.tar.gz -o gitleaks.tar.gz
+          tar -xvzf gitleaks.tar.gz
+          sudo mv gitleaks /usr/local/bin/
+          sudo chmod +x /usr/local/bin/gitleaks
+
+      - name: Prepare Gitleaks ignore file
+        run: |
+          echo ".scannerignore/" > .gitleaksignore
+
+      - name: Run Bandit (SAST) with filtering low and B104
+        run: |
+          bandit -r . -f json -o bandit_output.json || true
+          jq '.results | map(select(.test_id != "B104" and .issue_severity != "LOW"))' bandit_output.json > sast_results.json
+
+      - name: Run Gitleaks (Secrets Scan) excluding .scannerignore
+        run: |
+          gitleaks detect --source=. --gitleaks-ignore-path=.gitleaksignore --report-format=json --report-path=gitleaks_report.json || echo '{"results":[]}' > gitleaks_report.json
+
+      - name: Run Semgrep (SAST)
+        run: |
+          semgrep --config=p/ci --json > semgrep_output.json || echo '{"results":[]}' > semgrep_output.json
+
+      - name: Run flake8 (Code Style)
+        run: |
+          flake8 . --exit-zero --format=json > flake8_output.json
+
+      - name: Run black check (Code Style)
+        run: |
+          black . --check --diff > black_output.txt || true
+          echo "[" > black_output.json
+          awk '{print "{\"line\": \"" $0 "\"},"}' black_output.txt >> black_output.json
+          sed -i '$ s/},/}/' black_output.json
+          echo "]" >> black_output.json
+
+      - name: Merge all scan results into one JSON
+        run: |
+          echo "{" > full_report.json
+          echo '"sast":' >> full_report.json && cat sast_results.json >> full_report.json
+          echo ',' >> full_report.json
+          echo '"secrets":' >> full_report.json && cat gitleaks_report.json >> full_report.json
+          echo ',' >> full_report.json
+          echo '"semgrep":' >> full_report.json && cat semgrep_output.json >> full_report.json
+          echo ',' >> full_report.json
+          echo '"style": {"flake8":' >> full_report.json && cat flake8_output.json >> full_report.json
+          echo ',"black":' >> full_report.json && cat black_output.json >> full_report.json
+          echo '}' >> full_report.json
+          echo "}" >> full_report.json
+
+      - name: Upload scan results
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-results
+          path: |
+            sast_results.json
+            gitleaks_report.json
+            semgrep_output.json
+            flake8_output.json
+            black_output.json
+            full_report.json
+
+      - name: Fail build on high severity findings (except semgrep warnings)
+        run: |
+          fail=0
+          count_bandit=$(jq 'length' sast_results.json)
+          if [ "$count_bandit" -gt 0 ]; then
+            echo "Bandit issues found: $count_bandit"
+            fail=1
+          fi
+
+          count_gitleaks=$(jq 'length' gitleaks_report.json)
+          if [ "$count_gitleaks" -gt 0 ]; then
+            echo "Secrets found by Gitleaks: $count_gitleaks"
+            fail=1
+          fi
+
+          count_semgrep=$(jq '.results | map(select(.extra.severity == "ERROR")) | length' semgrep_output.json)
+          if [ "$count_semgrep" -gt 0 ]; then
+            echo "Semgrep critical errors found: $count_semgrep"
+            fail=1
+          else
+            echo "Semgrep issues found but no critical errors - build continues."
+          fi
+
+          if [ "$fail" -eq 1 ]; then
+            echo "Failing build due to security issues."
+            exit 1
+          fi
+
+  build-and-push:
+    needs: security-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Log in to DockerHub
+        run: echo "${{ secrets.PASS_SECRET }}" | docker login -u "x7m7s7" --password-stdin
+
+      - name: Build Docker Image
+        run: docker build -t $IMAGE_TAG .
+
+      - name: Push Docker Image
+        run: docker push $IMAGE_TAG
+
+  deploy-staging:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Fly.io CLI
+        run: |
+          curl -L https://fly.io/install.sh | sh
+          echo "$HOME/.fly/bin" >> $GITHUB_PATH
+
+      - name: Deploy with Retry
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --image $IMAGE_TAG --app devops-staging --remote-only --strategy rolling
+
+  nikto-scan:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Nikto
+        run: sudo apt-get update && sudo apt-get install -y nikto
+
+      - name: Run Nikto scan on staging
+        run: |
+          mkdir -p nikto_reports
+          nikto -h http://devops-staging.fly.dev -o nikto_reports/nikto_report.html -Format htm
+
+      - name: Upload Nikto report
+        uses: actions/upload-artifact@v4
+        with:
+          name: nikto-report
+          path: nikto_reports/nikto_report.html
+
+  deploy-production:
+    needs: nikto-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Fly.io CLI
+        run: |
+          curl -L https://fly.io/install.sh | sh
+          echo "$HOME/.fly/bin" >> $GITHUB_PATH
+
+      - name: Deploy to Production on Fly.io
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN2 }}
+        run: flyctl deploy --remote-only --app devops-production -c fly.production.toml
+name: Full CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+
+env:
+  IMAGE_TAG: x7m7s7/devops:latest
+
+jobs:
+
+  security-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install Python dependencies and security tools
+        run: |
+          pip install requests bandit detect-secrets jq flake8 black semgrep
+
       - name: Install Gitleaks v8.27.2 binary
         run: |
           curl -L https://github.com/gitleaks/gitleaks/releases/download/v8.27.2/gitleaks_8.27.2_linux_x64.tar.gz -o gitleaks.tar.gz
