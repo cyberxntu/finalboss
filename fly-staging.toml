@@ -1,10 +1,7 @@
 app = "devops-staging"
 
 [build]
-  image = "x7m7s7/devops:latest"  # خليه هنا بس علشان التوثيق، لكنه ما يستخدم أثناء --image
-
-[env]
-  INIT = "true"
+  image = "x7m7s7/devops:latest"
 
 [[services]]
   internal_port = 5000
@@ -17,5 +14,9 @@ app = "devops-staging"
   [[services.ports]]
     handlers = ["tls", "http"]
     port = 443
+
+[env]
+  PORT = "5000"
+
 [processes]
   app = "gunicorn -w 1 -b 0.0.0.0:5000 app:app"
