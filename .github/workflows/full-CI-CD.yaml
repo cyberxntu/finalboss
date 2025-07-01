@@ -25,24 +25,23 @@ jobs:
       - name: Install Python dependencies and security tools
         run: |
           pip install requests bandit detect-secrets jq flake8 black semgrep
-      - name: Install TruffleHog v3 explicitly
-        run: |
-            curl -L https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog-linux-amd64 -o trufflehog
-             chmod +x trufflehog
-             sudo mv trufflehog /usr/local/bin/
-        
 
+      - name: Install TruffleHog v3 binary
+        run: |
+          curl -L https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog-linux-amd64 -o trufflehog
+          chmod +x trufflehog
+          sudo mv trufflehog /usr/local/bin/trufflehog
 
       - name: Run Bandit (SAST) with filtering low and B104
         run: |
           bandit -r . -f json -o bandit_output.json || true
           jq '.results | map(select(.test_id != "B104" and .issue_severity != "LOW"))' bandit_output.json > sast_results.json
 
-      - name: Run truffleHog (Secret Scan)
+      - name: Run TruffleHog (Secrets Scan)
         run: |
           trufflehog filesystem . --json > trufflehog_report.json || echo '{"results":[]}' > trufflehog_report.json
 
-      - name: Run semgrep (SAST)
+      - name: Run Semgrep (SAST)
         run: |
           semgrep --config=p/ci --json > semgrep_output.json || echo '{"results":[]}' > semgrep_output.json
 
@@ -87,21 +86,18 @@ jobs:
       - name: Fail build on high severity findings (except semgrep warnings)
         run: |
           fail=0
-          # Bandit errors
           count_bandit=$(jq 'length' sast_results.json)
           if [ "$count_bandit" -gt 0 ]; then
             echo "Bandit issues found: $count_bandit"
             fail=1
           fi
 
-          # TruffleHog secrets (stop on any secret found)
-          count_trufflehog=$(jq '. | length' trufflehog_report.json)
+          count_trufflehog=$(jq 'length' trufflehog_report.json)
           if [ "$count_trufflehog" -gt 0 ]; then
-            echo "Secrets found by truffleHog: $count_trufflehog"
+            echo "Secrets found by TruffleHog: $count_trufflehog"
             fail=1
           fi
 
-          # Semgrep errors - only block if severity ERROR (skip warnings)
           count_semgrep=$(jq '.results | map(select(.extra.severity == "ERROR")) | length' semgrep_output.json)
           if [ "$count_semgrep" -gt 0 ]; then
             echo "Semgrep critical errors found: $count_semgrep"
