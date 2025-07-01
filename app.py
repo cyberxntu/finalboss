@@ -128,7 +128,7 @@ def dashboard():
     return render_template('dashboard.html', username=session['username'], balance=balance)
 
 @app.route('/comment', methods=['POST'])
-@csrf.exempt
+@csrf.exempt  # ممكن تشيل الإعفاء لو تأكدت من صحة CSRF في كل مكان
 def comment():
     if 'username' not in session:
         return redirect('/login')
@@ -154,10 +154,18 @@ def logout():
     session.clear()
     return redirect('/')
 
-# هذا هو التعديل المطلوب - Health check endpoint
 @app.route('/health')
 def health():
     return "OK", 200
 
+@app.after_request
+def set_security_headers(response):
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['Content-Security-Policy'] = "default-src 'self'"
+    return response
+
 if __name__ == '__main__':
+    # لا تغير 0.0.0.0 لأن Fly.io يحتاج الاستماع على جميع الواجهات
     app.run(host='0.0.0.0', port=5000)
