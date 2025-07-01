@@ -24,7 +24,7 @@ jobs:
 
       - name: Install Python dependencies and security tools
         run: |
-          pip install requests bandit detect-secrets jq flake8 black semgrep truffleHog
+          pip install requests bandit detect-secrets jq flake8 black semgrep --upgrade trufflehog
 
       - name: Run Bandit (SAST) with filtering low and B104
         run: |
