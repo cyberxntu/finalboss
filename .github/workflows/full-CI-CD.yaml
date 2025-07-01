@@ -28,9 +28,11 @@ jobs:
 
       - name: Install TruffleHog v3 binary
         run: |
-          curl -L https://github.com/trufflesecurity/trufflehog/releases/download/v3.89.2/trufflehog-linux-amd64 -o trufflehog
-          chmod +x trufflehog
-           sudo mv trufflehog /usr/local/bin/trufflehog
+          curl -L https://github.com/trufflesecurity/trufflehog/releases/download/v3.89.2/trufflehog_3.89.2_linux_amd64.tar.gz -o trufflehog.tar.gz
+          tar -xvzf trufflehog.tar.gz
+          sudo mv trufflehog /usr/local/bin/
+          sudo chmod +x /usr/local/bin/trufflehog
+
       
 
       - name: Run Bandit (SAST) with filtering low and B104
