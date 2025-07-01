@@ -26,7 +26,7 @@ jobs:
         run: |
           pip install requests bandit detect-secrets jq flake8 black semgrep
 
-      - name: Download and install Gitleaks v8.27.2
+      - name: Install Gitleaks v8.27.2 binary
         run: |
           curl -L https://github.com/gitleaks/gitleaks/releases/download/v8.27.2/gitleaks_8.27.2_linux_x64.tar.gz -o gitleaks.tar.gz
           tar -xvzf gitleaks.tar.gz
@@ -38,9 +38,9 @@ jobs:
           bandit -r . -f json -o bandit_output.json || true
           jq '.results | map(select(.test_id != "B104" and .issue_severity != "LOW"))' bandit_output.json > sast_results.json
 
-      - name: Run Gitleaks (Secrets Scan) excluding .scannerignore
+      - name: Run Gitleaks (Secrets Scan) ignoring .scannerignore
         run: |
-          gitleaks detect --source=. --gitleaks-ignore-path=.scannerignore --report-format=json --report-path=gitleaks_report.json || echo '{"results":[]}' > gitleaks_report.json
+          gitleaks detect --source=. --gitleaks-ignore-path=.scannerignore --report-format=json --report-path=gitleaks_report.json || echo '[]' > gitleaks_report.json
 
       - name: Run Semgrep (SAST)
         run: |
@@ -94,7 +94,7 @@ jobs:
             fail=1
           fi
 
-          count_gitleaks=$(jq '.results | length' gitleaks_report.json)
+          count_gitleaks=$(jq 'length' gitleaks_report.json)
           if [ "$count_gitleaks" -gt 0 ]; then
             echo "Secrets found by Gitleaks: $count_gitleaks"
             fail=1
