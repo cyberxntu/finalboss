@@ -1,26 +1,14 @@
 app = "devops-production"
 
 [build]
-  image = "x7m7s7/devops:latest"  # استخدم الـ tag الخاص بالإصدار الإنتاجي
+  image = "x7m7s7/devops:latest"
 
 [http_service]
   internal_port = 5000
-  force_https = true
-
+  force_https = true  
+  
 [env]
   PORT = "5000"
 
 [processes]
   app = "gunicorn -w 1 -b 0.0.0.0:5000 app:app"
-
-[[services]]
-  internal_port = 5000
-  protocol = "tcp"
-
-  [[services.ports]]
-    port = 80
-    handlers = ["http"]
-
-  [[services.ports]]
-    port = 443
-    handlers = ["tls", "http"]
