@@ -33,7 +33,7 @@ jobs:
 
       - name: Run truffleHog (Secret Scan)
         run: |
-          trufflehog filesystem --path . --json > trufflehog_report.json || echo '{"results":[]}' > trufflehog_report.json
+          trufflehog filesystem . --json > trufflehog_report.json || echo '{"results":[]}' > trufflehog_report.json
 
       - name: Run semgrep (SAST)
         run: |
