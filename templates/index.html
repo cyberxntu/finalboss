@@ -7,7 +7,7 @@
 </head>
 <body>
     <h1> التعليقات</h1>
-    {% if session.username %}
+    {% if username %}
     <form action="/comment" method="POST">
         <textarea name="comment" placeholder="اكتب تعليقك"></textarea>
         <button type="submit">إرسال</button>
