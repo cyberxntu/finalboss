@@ -44,7 +44,7 @@ jobs:
 
       - name: Run Gitleaks (Secrets Scan) ignoring .scannerignore
         run: |
-          gitleaks detect --source=. --gitleaks-ignore-path=.scannerignore --report-format=json --report-path=gitleaks_report.json || echo '[]' > gitleaks_report.json
+          gitleaks detect --source=. --gitleaks-ignore-path=.scannerignore --report-format=json --report-path=gitleaks_report.json || echo '{"results":[]}' > gitleaks_report.json
 
       - name: Run Semgrep (SAST)
         run: |
@@ -57,8 +57,9 @@ jobs:
       - name: Run black check (Code Style)
         run: |
           black . --check --diff > black_output.txt || true
+          grep '^[-+]' black_output.txt > black_errors.txt || true
           echo "[" > black_output.json
-          awk '{print "{\"line\": \"" $0 "\"},"}' black_output.txt >> black_output.json
+          awk '{print "{\"line\": \"" $0 "\"},"}' black_errors.txt >> black_output.json
           sed -i '$ s/},/}/' black_output.json
           echo "]" >> black_output.json
 
