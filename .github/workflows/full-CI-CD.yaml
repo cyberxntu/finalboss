@@ -26,7 +26,8 @@ jobs:
         run: |
           pip install requests bandit detect-secrets jq flake8 black semgrep
       - name: Install TruffleHog v3 explicitly
-        run: curl -L https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog-linux-amd64 -o trufflehog
+        run: |
+            curl -L https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog-linux-amd64 -o trufflehog
              chmod +x trufflehog
              sudo mv trufflehog /usr/local/bin/
         
