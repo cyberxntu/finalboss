@@ -51,7 +51,7 @@ def index():
     for comment in comments:
         safe_content = bleach.clean(comment['content'])
         safe_comments.append({'username': comment['username'], 'content': safe_content})
-    return render_template('index.html', comments=safe_comments)
+return render_template('index.html', comments=safe_comments, username=session.get('username'))
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
