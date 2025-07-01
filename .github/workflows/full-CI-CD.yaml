@@ -28,7 +28,7 @@ jobs:
 
       - name: Install Python dependencies and security tools
         run: |
-          pip install requests bandit detect-secrets jq flake8 black semgrep
+          pip install requests bandit detect-secrets jq  black semgrep
 
       - name: Install Gitleaks v8.27.2 binary
         run: |
@@ -50,9 +50,6 @@ jobs:
         run: |
           semgrep --config=p/ci --json > semgrep_output.json || echo '{"results":[]}' > semgrep_output.json
 
-      - name: Run flake8 (Code Style)
-        run: |
-          flake8 . --exit-zero --format=json > flake8_output.json
 
       - name: Run black check (Code Style)
         run: |
@@ -72,7 +69,6 @@ jobs:
           echo ',' >> full_report.json
           echo '"semgrep":' >> full_report.json && cat semgrep_output.json >> full_report.json
           echo ',' >> full_report.json
-          echo '"style": {"flake8":' >> full_report.json && cat flake8_output.json >> full_report.json
           echo ',"black":' >> full_report.json && cat black_output.json >> full_report.json
           echo '}' >> full_report.json
           echo "}" >> full_report.json
@@ -85,7 +81,6 @@ jobs:
             sast_results.json
             gitleaks_report.json
             semgrep_output.json
-            flake8_output.json
             black_output.json
             full_report.json
 
