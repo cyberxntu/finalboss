@@ -26,42 +26,21 @@ jobs:
         run: |
           pip install requests bandit detect-secrets jq flake8 black semgrep
 
-      - name: Install Gitleaks latest stable
+      - name: Install Gitleaks v8.27.2 binary
         run: |
-          curl -L https://github.com/gitleaks/gitleaks/releases/download/v9.16.0/gitleaks_9.16.0_linux_x64.tar.gz -o gitleaks.tar.gz
-          tar -xzf gitleaks.tar.gz
+          curl -L https://github.com/gitleaks/gitleaks/releases/download/v8.27.2/gitleaks_8.27.2_linux_x64.tar.gz -o gitleaks.tar.gz
+          tar -xvzf gitleaks.tar.gz
           sudo mv gitleaks /usr/local/bin/
           sudo chmod +x /usr/local/bin/gitleaks
 
-      - name: Prepare gitleaks config to exclude .scannerignore and reduce noise
-        run: |
-          cat > gitleaks.toml <<EOF
-          title = "Custom Gitleaks Config"
-          description = "Exclude .scannerignore and filter common false positives"
-
-          [[rules]]
-          description = "Exclude .scannerignore folder"
-          regex = ''''''
-          paths = ['.scannerignore']
-          allowlist = true
-
-          [[rules]]
-          description = "Exclude low entropy secrets"
-          entropy = 4.5
-          allowlist = true
-
-          # (يمكنك إضافة قواعد إضافية حسب الحاجة)
-
-          EOF
-
-      - name: Run Bandit (SAST) filtering low & B104
+      - name: Run Bandit (SAST) with filtering low and B104
         run: |
           bandit -r . -f json -o bandit_output.json || true
           jq '.results | map(select(.test_id != "B104" and .issue_severity != "LOW"))' bandit_output.json > sast_results.json
 
-      - name: Run Gitleaks (Secret Scan)
+      - name: Run Gitleaks (Secrets Scan) excluding .scannerignore
         run: |
-          gitleaks detect --source=. --config=gitleaks.toml --report-format=json --report-path=gitleaks_report.json || echo '{"results":[]}' > gitleaks_report.json
+          gitleaks detect --source=. --exclude-path=.scannerignore --report-format=json --report-path=gitleaks_report.json || echo '{"results":[]}' > gitleaks_report.json
 
       - name: Run Semgrep (SAST)
         run: |
