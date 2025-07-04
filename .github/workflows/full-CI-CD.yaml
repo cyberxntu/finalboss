@@ -128,36 +128,17 @@ jobs:
           CHAT_ID="5234453428"
 
           if [ "$fail" -eq 1 ]; then
-            MSG=$(cat <<EOF
-❌ *Security Scan Failed*
-
-🔍 Issues detected:
-- Bandit: $count_bandit
-- Gitleaks: $count_gitleaks
-- Semgrep (ERROR): $count_semgrep
-
-🔗 [View Workflow Run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)
-EOF
-)
+            MSG="Security Scan Failed\n\nIssues detected:\n- Bandit: $count_bandit\n- Gitleaks: $count_gitleaks\n- Semgrep (ERROR): $count_semgrep\n\nView Workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           else
-            MSG=$(cat <<EOF
-✅ *Security Scan Passed*
-
-All checks passed successfully.
-- Bandit: $count_bandit
-- Gitleaks: $count_gitleaks
-- Semgrep (ERROR): $count_semgrep
-
-🔗 [View Workflow Run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)
-EOF
-)
+            MSG="Security Scan Passed\n\nAll checks passed successfully.\n- Bandit: $count_bandit\n- Gitleaks: $count_gitleaks\n- Semgrep (ERROR): $count_semgrep\n\nView Workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           fi
 
           curl -s -X POST https://api.telegram.org/bot$TOKEN/sendMessage \
             -d chat_id="$CHAT_ID" \
-            -d text="$MSG" \
-            -d parse_mode="Markdown"
+            -d text="$MSG"
 
+
+      
   build-and-push:
     needs: security-check
     runs-on: ubuntu-latest
