@@ -28,7 +28,7 @@ jobs:
 
       - name: Install Python dependencies and security tools
         run: |
-          pip install requests bandit detect-secrets jq  black semgrep
+          pip install requests bandit detect-secrets jq black semgrep
 
       - name: Install Gitleaks v8.27.2 binary
         run: |
@@ -50,7 +50,6 @@ jobs:
         run: |
           semgrep --config=p/ci --json > semgrep_output.json || echo '{"results":[]}' > semgrep_output.json
 
-
       - name: Run black check (Code Style)
         run: |
           black . --check --diff > black_output.txt || true
@@ -69,8 +68,7 @@ jobs:
           echo ',' >> full_report.json
           echo '"semgrep":' >> full_report.json && cat semgrep_output.json >> full_report.json
           echo ',' >> full_report.json
-          echo ',"black":' >> full_report.json && cat black_output.json >> full_report.json
-          echo '}' >> full_report.json
+          echo '"black":' >> full_report.json && cat black_output.json >> full_report.json
           echo "}" >> full_report.json
 
       - name: Upload scan results
@@ -112,6 +110,53 @@ jobs:
             echo "Failing build due to security issues."
             exit 1
           fi
+
+      - name: Send Telegram Notification
+        if: always()
+        run: |
+          fail=0
+
+          count_bandit=$(jq 'length' sast_results.json)
+          count_gitleaks=$(jq 'length' gitleaks_report.json)
+          count_semgrep=$(jq '.results | map(select(.extra.severity == "ERROR")) | length' semgrep_output.json)
+
+          if [ "$count_bandit" -gt 0 ] || [ "$count_gitleaks" -gt 0 ] || [ "$count_semgrep" -gt 0 ]; then
+            fail=1
+          fi
+
+          TOKEN="${{ secrets.TELEGRAM_BOT_TOKEN }}"
+          CHAT_ID="5234453428"
+
+          if [ "$fail" -eq 1 ]; then
+            MSG=$(cat <<EOF
+❌ *Security Scan Failed*
+
+🔍 Issues detected:
+- Bandit: $count_bandit
+- Gitleaks: $count_gitleaks
+- Semgrep (ERROR): $count_semgrep
+
+🔗 [View Workflow Run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)
+EOF
+)
+          else
+            MSG=$(cat <<EOF
+✅ *Security Scan Passed*
+
+All checks passed successfully.
+- Bandit: $count_bandit
+- Gitleaks: $count_gitleaks
+- Semgrep (ERROR): $count_semgrep
+
+🔗 [View Workflow Run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)
+EOF
+)
+          fi
+
+          curl -s -X POST https://api.telegram.org/bot$TOKEN/sendMessage \
+            -d chat_id="$CHAT_ID" \
+            -d text="$MSG" \
+            -d parse_mode="Markdown"
 
   build-and-push:
     needs: security-check
