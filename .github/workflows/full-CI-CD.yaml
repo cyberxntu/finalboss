@@ -30,7 +30,7 @@ jobs:
         run: |
           pip install requests bandit detect-secrets jq black semgrep
 
-      - name: Install Gitleaks v8.27.2
+      - name: Install Gitleaks
         run: |
           curl -L https://github.com/gitleaks/gitleaks/releases/download/v8.27.2/gitleaks_8.27.2_linux_x64.tar.gz -o gitleaks.tar.gz
           tar -xvzf gitleaks.tar.gz
@@ -59,7 +59,7 @@ jobs:
           sed -i '$ s/},/}/' black_output.json
           echo "]" >> black_output.json
 
-      - name: Merge reports
+      - name: Merge scan results
         run: |
           echo "{" > full_report.json
           echo '"sast":' >> full_report.json && cat sast_results.json >> full_report.json
@@ -115,6 +115,7 @@ jobs:
           count_bandit=$(jq 'length' sast_results.json)
           count_gitleaks=$(jq 'length' gitleaks_report.json)
           count_semgrep=$(jq '.results | map(select(.extra.severity == "ERROR")) | length' semgrep_output.json)
+
           if [ "$count_bandit" -gt 0 ] || [ "$count_gitleaks" -gt 0 ] || [ "$count_semgrep" -gt 0 ]; then
             fail=1
           fi
@@ -152,15 +153,17 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Install Dockle
+      - name: Install Dockle (via .deb package)
         run: |
-          curl -sSfL https://raw.githubusercontent.com/goodwithtech/dockle/main/install.sh | sh -s --
-          sudo mv ./bin/dockle /usr/local/bin/
-          sudo chmod +x /usr/local/bin/dockle
+          VERSION=$(curl --silent "https://api.github.com/repos/goodwithtech/dockle/releases/latest" | \
+            grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+          curl -L -o dockle.deb https://github.com/goodwithtech/dockle/releases/download/v${VERSION}/dockle_${VERSION}_Linux-64bit.deb
+          sudo dpkg -i dockle.deb
+          rm dockle.deb
 
       - name: Scan Docker image with Dockle
         run: |
-          dockle -f json --exit-code 1 --exit-level HIGH $IMAGE_TAG > dockle-report.json || true
+          dockle -f json --exit-code 0 $IMAGE_TAG > dockle-report.json || true
 
       - name: Upload Dockle report
         uses: actions/upload-artifact@v4
@@ -168,15 +171,15 @@ jobs:
           name: dockle-report
           path: dockle-report.json
 
-      - name: Fail if HIGH severity issues found
+      - name: Fail if HIGH or CRITICAL issues found
         run: |
-          count=$(jq '[.details[] | select(.level == "HIGH")] | length' dockle-report.json)
-          echo "Found $count HIGH level warnings"
+          count=$(jq '[.details[] | select(.level == "HIGH" or .level == "CRITICAL")] | length' dockle-report.json)
+          echo "Found $count HIGH/CRITICAL level warnings"
           if [ "$count" -gt 0 ]; then
-            echo "❌ Build failed due to HIGH level Dockle findings"
+            echo "❌ Build failed due to HIGH/CRITICAL level Dockle findings"
             exit 1
           else
-            echo "✅ No HIGH issues - continue"
+            echo "✅ No HIGH/CRITICAL issues - continue"
           fi
 
   deploy-staging:
