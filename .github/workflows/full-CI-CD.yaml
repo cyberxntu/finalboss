@@ -152,10 +152,11 @@ jobs:
       - name: Build Docker Image
         run: docker build -t $IMAGE_TAG .
 
-      - name: Scan Docker Image with Grype
+      - name: Install and Run Grype for Docker Image Scan
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s --
-          ./grype $IMAGE_TAG -o json > grype-report.json
+          echo "$PWD/bin" >> $GITHUB_PATH
+          ./bin/grype $IMAGE_TAG -o json > grype-report.json
 
       - name: Upload Grype Report
         uses: actions/upload-artifact@v4
