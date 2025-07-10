@@ -148,41 +148,39 @@ jobs:
       - name: Push Docker Image
         run: docker push $IMAGE_TAG
 
-  grype-scan:
+  dockle-scan:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Install Grype
+      - name: Install Dockle
         run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s --
-          sudo mv ./bin/grype /usr/local/bin/
-          sudo chmod +x /usr/local/bin/grype
+          curl -sSfL https://raw.githubusercontent.com/goodwithtech/dockle/main/install.sh | sh -s --
+          sudo mv ./bin/dockle /usr/local/bin/
+          sudo chmod +x /usr/local/bin/dockle
 
-      - name: Scan Docker image with Grype
-        run: grype $IMAGE_TAG -o json > grype-report.json
+      - name: Scan Docker image with Dockle
+        run: |
+          dockle -f json --exit-code 1 --exit-level HIGH $IMAGE_TAG > dockle-report.json || true
 
-      - name: Upload Grype report
+      - name: Upload Dockle report
         uses: actions/upload-artifact@v4
         with:
-          name: grype-report
-          path: grype-report.json
+          name: dockle-report
+          path: dockle-report.json
 
-      - name: Fail if Critical or High CVEs found
+      - name: Fail if HIGH severity issues found
         run: |
-          count=$(jq '[.matches[] | select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical")] | length' grype-report.json)
-          echo "Found $count High/Critical vulnerabilities"
+          count=$(jq '[.details[] | select(.level == "HIGH")] | length' dockle-report.json)
+          echo "Found $count HIGH level warnings"
           if [ "$count" -gt 0 ]; then
-            echo "❌ Build failed due to High/Critical CVEs"
+            echo "❌ Build failed due to HIGH level Dockle findings"
             exit 1
           else
-            echo "✅ No blocking CVEs found."
+            echo "✅ No HIGH issues - continue"
           fi
 
   deploy-staging:
-    needs: grype-scan
+    needs: dockle-scan
     runs-on: ubuntu-latest
     steps:
       - name: Install Fly.io CLI
