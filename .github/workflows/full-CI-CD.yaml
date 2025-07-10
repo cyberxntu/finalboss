@@ -30,27 +30,27 @@ jobs:
         run: |
           pip install requests bandit detect-secrets jq black semgrep
 
-      - name: Install Gitleaks v8.27.2 binary
+      - name: Install Gitleaks v8.27.2
         run: |
           curl -L https://github.com/gitleaks/gitleaks/releases/download/v8.27.2/gitleaks_8.27.2_linux_x64.tar.gz -o gitleaks.tar.gz
           tar -xvzf gitleaks.tar.gz
           sudo mv gitleaks /usr/local/bin/
           sudo chmod +x /usr/local/bin/gitleaks
 
-      - name: Run Bandit (SAST) with filtering low and B104
+      - name: Run Bandit (SAST)
         run: |
           bandit -r . -f json -o bandit_output.json || true
           jq '.results | map(select(.test_id != "B104" and .issue_severity != "LOW"))' bandit_output.json > sast_results.json
 
-      - name: Run Gitleaks (Secrets Scan) ignoring .scannerignore
+      - name: Run Gitleaks
         run: |
           gitleaks detect --source=. --gitleaks-ignore-path=.scannerignore --report-format=json --report-path=gitleaks_report.json || echo '{"results":[]}' > gitleaks_report.json
 
-      - name: Run Semgrep (SAST)
+      - name: Run Semgrep
         run: |
           semgrep --config=p/ci --json > semgrep_output.json || echo '{"results":[]}' > semgrep_output.json
 
-      - name: Run black check (Code Style)
+      - name: Run black check
         run: |
           black . --check --diff > black_output.txt || true
           grep '^[-+]' black_output.txt > black_errors.txt || true
@@ -59,7 +59,7 @@ jobs:
           sed -i '$ s/},/}/' black_output.json
           echo "]" >> black_output.json
 
-      - name: Merge all scan results into one JSON
+      - name: Merge reports
         run: |
           echo "{" > full_report.json
           echo '"sast":' >> full_report.json && cat sast_results.json >> full_report.json
@@ -82,10 +82,9 @@ jobs:
             black_output.json
             full_report.json
 
-      - name: Fail build on high severity findings (except semgrep warnings)
+      - name: Fail build on high severity findings
         run: |
           fail=0
-
           count_bandit=$(jq 'length' sast_results.json)
           if [ "$count_bandit" -gt 0 ]; then
             echo "Bandit issues found: $count_bandit"
@@ -102,8 +101,6 @@ jobs:
           if [ "$count_semgrep" -gt 0 ]; then
             echo "Semgrep critical errors found: $count_semgrep"
             fail=1
-          else
-            echo "Semgrep found issues but no critical errors - build continues."
           fi
 
           if [ "$fail" -eq 1 ]; then
@@ -115,11 +112,9 @@ jobs:
         if: always()
         run: |
           fail=0
-
           count_bandit=$(jq 'length' sast_results.json)
           count_gitleaks=$(jq 'length' gitleaks_report.json)
           count_semgrep=$(jq '.results | map(select(.extra.severity == "ERROR")) | length' semgrep_output.json)
-
           if [ "$count_bandit" -gt 0 ] || [ "$count_gitleaks" -gt 0 ] || [ "$count_semgrep" -gt 0 ]; then
             fail=1
           fi
@@ -128,9 +123,9 @@ jobs:
           CHAT_ID="5234453428"
 
           if [ "$fail" -eq 1 ]; then
-            MSG="Security Scan Failed\n\nIssues detected:\n- Bandit: $count_bandit\n- Gitleaks: $count_gitleaks\n- Semgrep (ERROR): $count_semgrep\n\nView Workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            MSG="Security Scan Failed\n\nIssues:\n- Bandit: $count_bandit\n- Gitleaks: $count_gitleaks\n- Semgrep: $count_semgrep"
           else
-            MSG="Security Scan Passed\n\nAll checks passed successfully.\n- Bandit: $count_bandit\n- Gitleaks: $count_gitleaks\n- Semgrep (ERROR): $count_semgrep\n\nView Workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            MSG="Security Scan Passed\n\nAll checks passed."
           fi
 
           curl -s -X POST https://api.telegram.org/bot$TOKEN/sendMessage \
@@ -140,8 +135,6 @@ jobs:
   build-and-push:
     needs: security-check
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -152,32 +145,44 @@ jobs:
       - name: Build Docker Image
         run: docker build -t $IMAGE_TAG .
 
-      - name: Install and Run Grype for Docker Image Scan
+      - name: Push Docker Image
+        run: docker push $IMAGE_TAG
+
+  grype-scan:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Grype
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s --
-          echo "$PWD/bin" >> $GITHUB_PATH
-          ./bin/grype $IMAGE_TAG -o json > grype-report.json
+          sudo mv ./bin/grype /usr/local/bin/
+          sudo chmod +x /usr/local/bin/grype
 
-      - name: Upload Grype Report
+      - name: Scan Docker image with Grype
+        run: grype $IMAGE_TAG -o json > grype-report.json
+
+      - name: Upload Grype report
         uses: actions/upload-artifact@v4
         with:
           name: grype-report
           path: grype-report.json
 
-      - name: Fail build if Grype finds CRITICAL vulns
+      - name: Fail if Critical or High CVEs found
         run: |
-          critical_count=$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' grype-report.json)
-          echo "Critical issues found: $critical_count"
-          if [ "$critical_count" -gt 0 ]; then
-            echo "Failing build due to critical image vulnerabilities."
+          count=$(jq '[.matches[] | select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical")] | length' grype-report.json)
+          echo "Found $count High/Critical vulnerabilities"
+          if [ "$count" -gt 0 ]; then
+            echo "❌ Build failed due to High/Critical CVEs"
             exit 1
+          else
+            echo "✅ No blocking CVEs found."
           fi
 
-      - name: Push Docker Image
-        run: docker push $IMAGE_TAG
-
   deploy-staging:
-    needs: build-and-push
+    needs: grype-scan
     runs-on: ubuntu-latest
     steps:
       - name: Install Fly.io CLI
@@ -185,7 +190,7 @@ jobs:
           curl -L https://fly.io/install.sh | sh
           echo "$HOME/.fly/bin" >> $GITHUB_PATH
 
-      - name: Deploy with Retry
+      - name: Deploy to staging
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --image $IMAGE_TAG --app devops-staging --remote-only --strategy rolling
@@ -197,7 +202,7 @@ jobs:
       - name: Install Nikto
         run: sudo apt-get update && sudo apt-get install -y nikto
 
-      - name: Run Nikto scan on staging
+      - name: Scan staging with Nikto
         run: |
           mkdir -p nikto_reports
           nikto -h http://devops-staging.fly.dev -o nikto_reports/nikto_report.html -Format htm
@@ -217,7 +222,7 @@ jobs:
           curl -L https://fly.io/install.sh | sh
           echo "$HOME/.fly/bin" >> $GITHUB_PATH
 
-      - name: Deploy to Production on Fly.io
+      - name: Deploy to production
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN2 }}
         run: flyctl deploy --remote-only --app devops-production -c fly.production.toml
