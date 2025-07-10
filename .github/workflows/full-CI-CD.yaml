@@ -137,8 +137,6 @@ jobs:
             -d chat_id="$CHAT_ID" \
             -d text="$MSG"
 
-
-      
   build-and-push:
     needs: security-check
     runs-on: ubuntu-latest
@@ -153,6 +151,26 @@ jobs:
 
       - name: Build Docker Image
         run: docker build -t $IMAGE_TAG .
+
+      - name: Scan Docker Image with Grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s --
+          ./grype $IMAGE_TAG -o json > grype-report.json
+
+      - name: Upload Grype Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: grype-report
+          path: grype-report.json
+
+      - name: Fail build if Grype finds CRITICAL vulns
+        run: |
+          critical_count=$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' grype-report.json)
+          echo "Critical issues found: $critical_count"
+          if [ "$critical_count" -gt 0 ]; then
+            echo "Failing build due to critical image vulnerabilities."
+            exit 1
+          fi
 
       - name: Push Docker Image
         run: docker push $IMAGE_TAG
