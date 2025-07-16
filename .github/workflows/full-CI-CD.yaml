@@ -143,6 +143,9 @@ jobs:
       - name: Log in to DockerHub
         run: echo "${{ secrets.PASS_SECRET }}" | docker login -u "x7m7s7" --password-stdin
 
+      - name: Enable Docker Content Trust
+        run: echo "DOCKER_CONTENT_TRUST=1" >> $GITHUB_ENV
+
       - name: Build Docker Image
         run: docker build -t $IMAGE_TAG .
 
