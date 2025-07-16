@@ -1,6 +1,7 @@
 FROM python:3.11.6-slim
 
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+RUN find / -xdev \( -perm -4000 -o -perm -2000 \) -type f -exec chmod a-s {} +
 
 WORKDIR /app
 RUN chown appuser:appgroup /app
