@@ -1,20 +1,23 @@
-FROM python:3.11-slim
+FROM python:3.11.6-slim
 
-RUN adduser --disabled-password --gecos '' appuser
-USER appuser
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 
 WORKDIR /app
+RUN chown appuser:appgroup /app
 
-COPY --chown=appuser:appuser requirements.txt .
-
-RUN pip install --upgrade pip setuptools==70.0.0 --no-cache-dir
+COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY --chown=appuser:appuser . .
+COPY . .
+
+USER appuser
 
 ENV FLASK_APP=app.py
 ENV FLASK_RUN_HOST=0.0.0.0
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:5000/health || exit 1
 
 EXPOSE 5000
 
