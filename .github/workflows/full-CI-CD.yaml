@@ -156,14 +156,18 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Install Dockle (via .deb package)
+    
+      - name: Install Dockle (tar.gz)
         run: |
-          VERSION=$(curl --silent "https://api.github.com/repos/goodwithtech/dockle/releases/latest" | \
-            grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-          curl -L -o dockle.deb https://github.com/goodwithtech/dockle/releases/download/v${VERSION}/dockle_${VERSION}_Linux-64bit.deb
-          sudo dpkg -i dockle.deb
-          rm dockle.deb
+             VERSION=$(curl --silent "https://api.github.com/repos/goodwithtech/dockle/releases/latest" | \
+              jq -r '.tag_name')
+              curl -L -o dockle.tar.gz "https://github.com/goodwithtech/dockle/releases/download/${VERSION}/dockle_${VERSION#v}_Linux-64bit.tar.gz"
+              tar -xvzf dockle.tar.gz
+                sudo mv dockle /usr/local/bin/
+              sudo chmod +x /usr/local/bin/dockle 
 
+
+  
       - name: Scan Docker image with Dockle
         run: |
           dockle -f json --exit-code 0 $IMAGE_TAG > dockle-report.json || true
